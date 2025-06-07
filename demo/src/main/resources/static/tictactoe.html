@@ -1,0 +1,68 @@
+<!-- src/main/resources/static/tictactoe.html -->
+<!DOCTYPE html>
+<html ng-app="ticTacToeApp">
+<head>
+    <meta charset="UTF-8">
+    <title>Tic Tac Toe - AngularJS + Spring Boot</title>
+    <script src="https://ajax.googleapis.com/ajax/libs/angularjs/1.8.2/angular.min.js"></script>
+    <style>
+        table { border-collapse: collapse; margin: 20px 0; }
+        td {
+            width: 60px; height: 60px; text-align: center; font-size: 2em;
+            border: 1px solid #333; cursor: pointer;
+        }
+        td.disabled { background: #eee; cursor: not-allowed; }
+    </style>
+</head>
+<body ng-controller="TicTacToeController">
+
+<h1>Tic Tac Toe</h1>
+<a href="index.html"><button>Back to Main Menu</button></a>
+<table>
+    <tr ng-repeat="row in board track by $index">
+        <td ng-repeat="cell in row track by $index"
+            ng-click="makeMove($parent.$index, $index)"
+            ng-class="{'disabled': cell !== ' ' || winner}">
+            {{ cell === ' ' ? '' : cell }}
+        </td>
+    </tr>
+</table>
+<div ng-if="winner">
+    <h2 ng-if="winner === 'Draw'">It's a Draw!</h2>
+    <h2 ng-if="winner !== 'Draw'">Winner: {{ winner }}</h2>
+    <button ng-click="reset()">Restart</button>
+</div>
+<div ng-if="!winner">
+    <h3>Current Player: {{ currentPlayer }}</h3>
+</div>
+
+<script>
+    angular.module('ticTacToeApp', [])
+        .controller('TicTacToeController', function($scope, $http) {
+            function loadState() {
+                $http.get('/api/tictactoe/state').then(function(res) {
+                    $scope.board = res.data.board;
+                    $scope.currentPlayer = res.data.currentPlayer;
+                    $scope.winner = res.data.winner;
+                });
+            }
+            $scope.makeMove = function(row, col) {
+                if ($scope.board[row][col] !== ' ' || $scope.winner) return;
+                $http.post('/api/tictactoe/move', {row: row, col: col}).then(function(res) {
+                    $scope.board = res.data.board;
+                    $scope.currentPlayer = res.data.currentPlayer;
+                    $scope.winner = res.data.winner;
+                });
+            };
+            $scope.reset = function() {
+                $http.post('/api/tictactoe/reset').then(function(res) {
+                    $scope.board = res.data.board;
+                    $scope.currentPlayer = res.data.currentPlayer;
+                    $scope.winner = res.data.winner;
+                });
+            };
+            loadState();
+        });
+</script>
+</body>
+</html>

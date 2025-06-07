@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html ng-app="tetrisApp">
+<head>
+    <meta charset="UTF-8">
+    <title>Tetris - AngularJS + Spring Boot</title>
+    <script src="https://ajax.googleapis.com/ajax/libs/angularjs/1.8.2/angular.min.js"></script>
+    <style>
+        body { font-family: Arial, sans-serif; }
+        #tetris-board { background: #222; margin: 20px auto; display: block; }
+        #score { font-size: 1.2em; }
+        .controls { margin: 10px 0; }
+    </style>
+</head>
+<body ng-controller="TetrisController">
+<h1>Tetris</h1>
+<a href="index.html"><button>Back to Main Menu</button></a>
+<div id="score">Score: {{score}}</div>
+<canvas id="tetris-board" width="200" height="400"></canvas>
+<div class="controls">
+    <p>Controls: ← → (move), ↑ (rotate), ↓ (down), Space (drop)</p>
+    <button ng-click="reset()">Restart</button>
+</div>
+<div ng-if="gameOver">
+    <h2>Game Over!</h2>
+    <form ng-if="!scoreSaved" ng-submit="saveScore()">
+        <label>Enter your name: <input ng-model="playerName" required></label>
+        <button type="submit">Save Score</button>
+    </form>
+    <div ng-if="scoreSaved">
+        <strong>Score saved!</strong>
+    </div>
+</div>
+
+<h3>High Scores</h3>
+<ul>
+    <li ng-repeat="s in highScores">{{s.player}}: {{s.score}}</li>
+</ul>
+<script>
+    angular.module('tetrisApp', [])
+        .controller('TetrisController', function($scope, $timeout, $http) {
+            // Tetris constants
+            const COLS = 10, ROWS = 20, BLOCK = 20;
+            const COLORS = ['#000', '#f00', '#0f0', '#00f', '#ff0', '#0ff', '#f0f', '#fff'];
+            const SHAPES = [
+                [],
+                [[1,1,1,1]], // I
+                [[2,2],[2,2]], // O
+                [[0,3,0],[3,3,3]], // T
+                [[0,4,4],[4,4,0]], // S
+                [[5,5,0],[0,5,5]], // Z
+                [[6,0,0],[6,6,6]], // J
+                [[0,0,7],[7,7,7]]  // L
+            ];
+            $scope.playerName = "";
+            $scope.scoreSaved = false;
+            $scope.highScores = [];
+
+            let board, current, currentX, currentY, currentShape, gameLoop, dropInterval = 500;
+            $scope.score = 0;
+            $scope.gameOver = false;
+
+            $scope.saveScore = function() {
+                if (!$scope.playerName) return;
+                $http.post('/api/tetris/scores', {player: $scope.playerName, score: $scope.score})
+                    .then(function() {
+                        $scope.scoreSaved = true;
+                        $scope.loadScores();
+                    });
+            };
+
+            $scope.loadScores = function() {
+                $http.get('/api/tetris/scores').then(function(res) {
+                    $scope.highScores = res.data;
+                });
+            };
+
+            $scope.reset = function() {
+                stopGame();
+                $scope.score = 0;
+                $scope.gameOver = false;
+                $scope.scoreSaved = false;
+                $scope.playerName = "";
+                newBoard();
+                resetCurrent();
+                draw();
+                gameLoop = $timeout(drop, dropInterval);
+                $scope.loadScores();
+            };
+
+            $scope.loadScores();
+
+            function newBoard() {
+                board = [];
+                for (let r = 0; r < ROWS; r++) {
+                    board[r] = [];
+                    for (let c = 0; c < COLS; c++) {
+                        board[r][c] = 0;
+                    }
+                }
+            }
+
+            function randomShape() {
+                let id = Math.floor(Math.random() * (SHAPES.length - 1)) + 1;
+                let shape = SHAPES[id];
+                return { id: id, shape: shape };
+            }
+
+            function resetCurrent() {
+                let piece = randomShape();
+                current = piece.shape;
+                currentShape = piece.id;
+                currentY = 0;
+                currentX = Math.floor((COLS - current[0].length) / 2);
+                if (collides(0, 0, current)) {
+                    $scope.gameOver = true;
+                    stopGame();
+                }
+            }
+
+            function collides(dx, dy, shape) {
+                for (let y = 0; y < shape.length; y++) {
+                    for (let x = 0; x < shape[y].length; x++) {
+                        if (shape[y][x]) {
+                            let newX = currentX + x + dx;
+                            let newY = currentY + y + dy;
+                            if (newX < 0 || newX >= COLS || newY >= ROWS) return true;
+                            if (newY >= 0 && board[newY][newX]) return true;
+                        }
+                    }
+                }
+                return false;
+            }
+
+            function merge() {
+                for (let y = 0; y < current.length; y++) {
+                    for (let x = 0; x < current[y].length; x++) {
+                        if (current[y][x]) {
+                            board[currentY + y][currentX + x] = currentShape;
+                        }
+                    }
+                }
+            }
+
+            function clearLines() {
+                let lines = 0;
+                for (let y = ROWS - 1; y >= 0; y--) {
+                    let full = true;
+                    for (let x = 0; x < COLS; x++) {
+                        if (!board[y][x]) {
+                            full = false;
+                            break;
+                        }
+                    }
+                    if (full) {
+                        board.splice(y, 1);
+                        board.unshift(Array(COLS).fill(0));
+                        lines++;
+                        y++;
+                    }
+                }
+                if (lines > 0) $scope.score += lines * 100;
+            }
+
+            function rotate(shape) {
+                let newShape = [];
+                for (let x = 0; x < shape[0].length; x++) {
+                    newShape[x] = [];
+                    for (let y = shape.length - 1; y >= 0; y--) {
+                        newShape[x][shape.length - 1 - y] = shape[y][x];
+                    }
+                }
+                return newShape;
+            }
+
+            function draw() {
+                let ctx = document.getElementById('tetris-board').getContext('2d');
+                ctx.clearRect(0, 0, COLS * BLOCK, ROWS * BLOCK);
+                // Draw board
+                for (let y = 0; y < ROWS; y++) {
+                    for (let x = 0; x < COLS; x++) {
+                        ctx.fillStyle = COLORS[board[y][x]];
+                        ctx.fillRect(x * BLOCK, y * BLOCK, BLOCK - 1, BLOCK - 1);
+                    }
+                }
+                // Draw current
+                for (let y = 0; y < current.length; y++) {
+                    for (let x = 0; x < current[y].length; x++) {
+                        if (current[y][x]) {
+                            ctx.fillStyle = COLORS[currentShape];
+                            ctx.fillRect((currentX + x) * BLOCK, (currentY + y) * BLOCK, BLOCK - 1, BLOCK - 1);
+                        }
+                    }
+                }
+            }
+
+            function drop() {
+                if (!$scope.gameOver) {
+                    if (!collides(0, 1, current)) {
+                        currentY++;
+                    } else {
+                        merge();
+                        clearLines();
+                        resetCurrent();
+                    }
+                    draw();
+                    gameLoop = $timeout(drop, dropInterval);
+                }
+            }
+
+            function stopGame() {
+                if (gameLoop) $timeout.cancel(gameLoop);
+            }
+
+            // Keyboard controls
+            document.addEventListener('keydown', function(e) {
+                if ($scope.gameOver) return;
+                let handled = true;
+                switch (e.key) {
+                    case 'ArrowLeft':
+                        if (!collides(-1, 0, current)) currentX--;
+                        break;
+                    case 'ArrowRight':
+                        if (!collides(1, 0, current)) currentX++;
+                        break;
+                    case 'ArrowDown':
+                        if (!collides(0, 1, current)) currentY++;
+                        break;
+                    case 'ArrowUp':
+                        let rotated = rotate(current);
+                        if (!collides(0, 0, rotated)) current = rotated;
+                        break;
+                    case ' ':
+                        while (!collides(0, 1, current)) currentY++;
+                        break;
+                    default:
+                        handled = false;
+                }
+                if (handled) {
+                    draw();
+                    e.preventDefault();
+                }
+            });
+
+            // Start game
+            $scope.reset();
+        });
+</script>
+</body>
+</html>
